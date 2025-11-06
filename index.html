@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cancer Recurrence Monitoring Dashboard</title>
+  <meta name="description" content="Milestone-based dashboard to track cancer recurrence monitoring over a year." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Calming palette */
+    :root {
+      --bg: #f7fafc;         /* gray-50 */
+      --panel: #ffffff;      /* white */
+      --accent: #7cc5b3;     /* soft teal */
+      --accent-2: #a7c5eb;   /* soft blue */
+      --text: #1f2937;       /* gray-800 */
+      --muted: #6b7280;      /* gray-500 */
+      --warn: #f59e0b;       /* amber-500 */
+      --bad: #ef4444;        /* red-500 */
+      --good: #10b981;       /* emerald-500 */
+    }
+    .glass {
+      background: rgba(255, 255, 255, 0.8);
+      backdrop-filter: saturate(160%) blur(8px);
+    }
+    .progress-track {
+      position: relative;
+      height: 10px;
+      border-radius: 9999px;
+      background: linear-gradient(90deg, #e5f3ef, #eaf1fb);
+      overflow: hidden;
+    }
+    .progress-bar {
+      position: absolute;
+      top: 0; left: 0; height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    }
+    .dot {
+      width: 14px; height: 14px; border-radius: 9999px; position: absolute; top: 50%; transform: translate(-50%, -50%);
+      border: 2px solid white;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      background: #93c5fd; /* blue-300 */
+    }
+    .dot.completed { background: #6ee7b7; } /* green-300 */
+    .dot.upcoming { background: #fde68a; }   /* amber-200 */
+  </style>
+</head>
+<body class="min-h-screen bg-[var(--bg)] text-[var(--text)]">
+  <div class="max-w-6xl mx-auto px-4 py-6">
+    <!-- Header -->
+    <header class="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+      <div>
+        <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Recurrence Monitoring Dashboard</h1>
+        <p class="text-[var(--muted)] mt-1">A simple, milestone-based plan over one year with storage for results and notes.</p>
+      </div>
+      <div class="grid grid-cols-2 md:flex md:items-center gap-3">
+        <label class="flex flex-col text-sm">
+          <span class="text-[var(--muted)]">Plan Start Date</span>
+          <input id="planStart" type="date" class="mt-1 rounded-xl border border-gray-200 px-3 py-2 bg-white" />
+        </label>
+        <label class="flex flex-col text-sm">
+          <span class="text-[var(--muted)]">Plan Year Length</span>
+          <select id="planLength" class="mt-1 rounded-xl border border-gray-200 px-3 py-2 bg-white">
+            <option value="12">12 months</option>
+            <option value="18">18 months</option>
+          </select>
+        </label>
+        <button id="resetBtn" class="col-span-2 md:col-span-1 rounded-xl bg-white border border-gray-200 px-4 py-2 text-sm hover:bg-gray-50">Reset to Today</button>
+        <div class="col-span-2 md:col-span-1 flex gap-2">
+          <button id="exportBtn" class="rounded-xl bg-white border border-gray-200 px-4 py-2 text-sm hover:bg-gray-50">Export Data</button>
+          <label class="rounded-xl bg-white border border-gray-200 px-4 py-2 text-sm hover:bg-gray-50 cursor-pointer">
+            Import Data
+            <input id="importInput" type="file" accept="application/json" class="hidden" />
+          </label>
+        </div>
+      </div>
+    </header>
+
+    <!-- Settings / API Key Modal Trigger -->
+    <div class="mt-3 flex items-center gap-2">
+      <button id="settingsBtn" class="rounded-xl bg-white border border-gray-200 px-4 py-2 text-sm hover:bg-gray-50">Settings</button>
+      <span id="aiStatus" class="text-xs text-[var(--muted)]">AI: <span id="aiStatusInner">Disabled</span></span>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="fixed inset-0 hidden items-center justify-center bg-black/30 z-50">
+      <div class="glass rounded-2xl shadow-2xl w-[min(92vw,560px)]">
+        <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+          <h3 class="font-semibold">Settings: OpenAI Assistant (optional)</h3>
+          <button id="settingsClose" class="text-[var(--muted)]">✕</button>
+        </div>
+        <div class="p-5 space-y-4">
+          <div class="text-sm text-[var(--muted)]">
+            Add your <span class="font-medium">OpenAI API key</span> to let the chat assistant interpret natural language and update the dashboard. Your key is stored locally in <code>localStorage</code> and used to call OpenAI directly from your browser.
+          </div>
+          <div class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm">
+            <div class="font-medium mb-1">Security note</div>
+            Never publish your key on a public site. Client-side keys can be scraped; prefer <em>ephemeral keys</em> minted by a tiny backend if you plan to share this page.
+          </div>
+          <label class="block text-sm">OpenAI API Key
+            <input id="openaiKey" type="password" placeholder="sk-..." class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 bg-white" />
+          </label>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label class="block text-sm">Model
+              <select id="openaiModel" class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 bg-white">
+                <option value="gpt-4o-mini">gpt-4o-mini (fast, low cost)</option>
+                <option value="gpt-4o">gpt-4o</option>
+              </select>
+            </label>
+            <label class="block text-sm">Enable AI Assistant
+              <select id="aiEnabled" class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 bg-white">
+                <option value="false">Disabled</option>
+                <option value="true">Enabled</option>
+              </select>
+            </label>
+          </div>
+          <div class="flex items-center justify-end gap-2">
+            <button id="saveSettings" class="rounded-xl bg-[var(--accent)] text-white px-4 py-2 text-sm">Save</button>
+          </div>
+          <div class="text-xs text-[var(--muted)]">Tip: With AI enabled, you can type things like “Move Test 2 to next Friday and mark it Scheduled” or “Summarize last two results and add to ‘Results from Last Time’”.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Year Progress -->
+    <section class="mt-6 p-5 rounded-2xl glass shadow-sm">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold">Year Progress</h2>
+        <div class="text-sm text-[var(--muted)]"><span id="progressPct">0%</span> through plan</div>
+      </div>
+      <div class="progress-track" id="progressTrack">
+        <div class="progress-bar" id="progressBar" style="width:0%"></div>
+        <!-- Milestone dots dynamically injected here -->
+      </div>
+      <div class="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3" id="milestoneLabels"><!-- labels injected --></div>
+      <p class="text-xs text-[var(--muted)] mt-2">Default milestones are placed 3 months apart: Test 1, Test 2, Test 3, Test 4. You can edit dates and details below.</p>
+    </section>
+
+    <!-- Overview Cards -->
+    <section class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <article class="p-5 rounded-2xl glass shadow-sm">
+        <header class="flex items-center justify-between mb-2">
+          <h3 class="font-semibold">Next Up</h3>
+          <button data-save="nextUp" class="saveBtn text-sm px-3 py-1 rounded-lg bg-[var(--accent)] text-white">Save</button>
+        </header>
+        <textarea id="nextUp" class="w-full h-28 rounded-xl border border-gray-200 p-3" placeholder="e.g., Test 2 on Feb 10 – schedule fasting labs"></textarea>
+      </article>
+      <article class="p-5 rounded-2xl glass shadow-sm">
+        <header class="flex items-center justify-between mb-2">
+          <h3 class="font-semibold">Results from Last Time</h3>
+          <button data-save="lastResults" class="saveBtn text-sm px-3 py-1 rounded-lg bg-[var(--accent)] text-white">Save</button>
+        </header>
+        <textarea id="lastResults" class="w-full h-28 rounded-xl border border-gray-200 p-3" placeholder="e.g., CTC = 1.2; hsCRP = 0.6; AST/ALT normal"></textarea>
+      </article>
+      <article class="p-5 rounded-2xl glass shadow-sm">
+        <header class="flex items-center justify-between mb-2">
+          <h3 class="font-semibold">Things We're Watching</h3>
+          <button data-save="watching" class="saveBtn text-sm px-3 py-1 rounded-lg bg-[var(--accent)] text-white">Save</button>
+        </header>
+        <textarea id="watching" class="w-full h-28 rounded-xl border border-gray-200 p-3" placeholder="e.g., neutrophils trending low; vitamin D target 60–80; LDH baseline"></textarea>
+      </article>
+    </section>
+
+    <!-- Tests Section -->
+    <section class="mt-8">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold">Milestones & Tests</h2>
+        <button id="addTestBtn" class="rounded-xl bg-white border border-gray-200 px-4 py-2 text-sm hover:bg-gray-50">Add Milestone</button>
+      </div>
+      <div id="testsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4"><!-- test cards injected --></div>
+    </section>
+  </div>
+
+  <!-- Floating Chat Assistant -->
+  <button id="chatToggle" class="fixed bottom-5 right-5 rounded-full p-4 shadow-lg bg-[var(--accent)] text-white">Chat</button>
+  <div id="chatPanel" class="fixed bottom-20 right-5 w-[min(90vw,420px)] max-h-[70vh] hidden">
+    <div class="glass rounded-2xl shadow-xl flex flex-col overflow-hidden">
+      <div class="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+        <h4 class="font-semibold">Dashboard Assistant</h4>
+        <button id="chatClose" class="text-[var(--muted)]">✕</button>
+      </div>
+      <div id="chatLog" class="p-4 space-y-3 overflow-y-auto" style="max-height: 48vh;"></div>
+      <div class="p-3 border-t border-gray-200 flex gap-2">
+        <input id="chatInput" class="flex-1 rounded-xl border border-gray-200 px-3 py-2" placeholder="Try: mark test 1 completed" />
+        <button id="chatSend" class="rounded-xl bg-[var(--accent-2)] text-white px-4">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <template id="testCardTemplate">
+    <article class="p-5 rounded-2xl glass shadow-sm">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h3 class="font-semibold text-lg"><span class="test-name"></span></h3>
+          <p class="text-sm text-[var(--muted)]">Milestone in the annual plan</p>
+        </div>
+        <select class="status text-sm rounded-xl border border-gray-200 px-2 py-1">
+          <option>Pending</option>
+          <option>Upcoming</option>
+          <option>Scheduled</option>
+          <option>Completed</option>
+          <option>Needs Follow-up</option>
+        </select>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 mt-3">
+        <label class="text-sm">Date
+          <input type="date" class="date w-full mt-1 rounded-xl border border-gray-200 px-3 py-2 bg-white" />
+        </label>
+        <label class="text-sm">Time (optional)
+          <input type="time" class="time w-full mt-1 rounded-xl border border-gray-200 px-3 py-2 bg-white" />
+        </label>
+      </div>
+
+      <div class="mt-3">
+        <label class="text-sm">Overview / Purpose
+          <textarea class="purpose w-full h-20 mt-1 rounded-xl border border-gray-200 p-3" placeholder="Leave room to elaborate on what makes up each test..."></textarea>
+        </label>
+      </div>
+
+      <div class="mt-3 grid grid-cols-1 gap-3">
+        <label class="text-sm">Results / Notes
+          <textarea class="results w-full h-24 mt-1 rounded-xl border border-gray-200 p-3" placeholder="Paste key values, ranges, impressions"></textarea>
+        </label>
+      </div>
+
+      <div class="mt-3">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-medium">Attach Files (PDF, images, etc.)</span>
+          <div class="text-xs text-[var(--muted)]">Stored locally in your browser</div>
+        </div>
+        <div class="mt-2 flex items-center gap-2">
+          <input type="file" class="fileInput hidden" multiple />
+          <button class="fileBtn rounded-xl bg-white border border-gray-200 px-3 py-1 text-sm hover:bg-gray-50">Upload</button>
+          <button class="clearFilesBtn rounded-xl border border-gray-200 px-3 py-1 text-sm hover:bg-gray-50">Clear Files</button>
+        </div>
+        <ul class="fileList mt-2 space-y-1 text-sm"></ul>
+      </div>
+
+      <div class="mt-4 flex items-center justify-end gap-2">
+        <button class="saveTest rounded-xl bg-[var(--accent)] text-white px-4 py-2 text-sm">Save</button>
+        <button class="deleteTest rounded-xl border border-gray-200 px-4 py-2 text-sm">Delete</button>
+      </div>
+    </article>
+  </template>
+
+  <script>
+    // --- Simple Local Storage + IndexedDB layer ---
+    const DB_NAME = 'recurrence-dashboard-db';
+    const DB_VERSION = 1;
+    const FILE_STORE = 'files';
+
+    let idb;
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(FILE_STORE)) {
+            db.createObjectStore(FILE_STORE, { keyPath: 'id' });
+          }
+        };
+        req.onsuccess = () => { idb = req.result; resolve(idb); };
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function putFile(fileRec) {
+      if (!idb) await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = idb.transaction(FILE_STORE, 'readwrite');
+        tx.objectStore(FILE_STORE).put(fileRec);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    async function getFilesByTest(testId) {
+      if (!idb) await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = idb.transaction(FILE_STORE, 'readonly');
+        const store = tx.objectStore(FILE_STORE);
+        const files = [];
+        const req = store.openCursor();
+        req.onsuccess = (e) => {
+          const cursor = e.target.result;
+          if (cursor) {
+            if (cursor.value.testId === testId) files.push(cursor.value);
+            cursor.continue();
+          } else {
+            resolve(files);
+          }
+        };
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function clearFilesByTest(testId) {
+      if (!idb) await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = idb.transaction(FILE_STORE, 'readwrite');
+        const store = tx.objectStore(FILE_STORE);
+        const req = store.openCursor();
+        req.onsuccess = (e) => {
+          const cursor = e.target.result;
+          if (cursor) {
+            if (cursor.value.testId === testId) store.delete(cursor.key);
+            cursor.continue();
+          } else {
+            resolve();
+          }
+        };
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    function uid(prefix='id') { return `${prefix}_${Math.random().toString(36).slice(2,9)}`; }
+
+    // --- Data Model in localStorage ---
+    const DEFAULT_TESTS = [
+      { id: uid('t'), name: 'Test 1', status: 'Pending', date: null, time: '', purpose: '', results: '' },
+      { id: uid('t'), name: 'Test 2', status: 'Pending', date: null, time: '', purpose: '', results: '' },
+      { id: uid('t'), name: 'Test 3', status: 'Pending', date: null, time: '', purpose: '', results: '' },
+      { id: uid('t'), name: 'Test 4', status: 'Pending', date: null, time: '', purpose: '', results: '' },
+    ];
+
+    const store = {
+      get() {
+        const raw = localStorage.getItem('recurrence_dashboard');
+        if (raw) return JSON.parse(raw);
+        const today = new Date();
+        const data = {
+          planStart: new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString().slice(0,10),
+          planLengthMonths: 12,
+          nextUp: '',
+          lastResults: '',
+          watching: '',
+          tests: DEFAULT_TESTS
+        };
+        // Seed default test dates at 0, 3, 6, 9 months from start
+        data.tests = seedDefaultDates(data);
+        this.set(data);
+        return data;
+      },
+      set(v) { localStorage.setItem('recurrence_dashboard', JSON.stringify(v)); },
+    };
+
+    function seedDefaultDates(data) {
+      const start = new Date(data.planStart);
+      const offsets = [0, 3, 6, 9];
+      return data.tests.map((t, i) => {
+        const d = new Date(start);
+        d.setMonth(d.getMonth() + (offsets[i] || 0));
+        return { ...t, date: d.toISOString().slice(0,10) };
+      });
+    }
+
+    // --- UI Rendering ---
+    const els = {
+      planStart: document.getElementById('planStart'),
+      planLength: document.getElementById('planLength'),
+      resetBtn: document.getElementById('resetBtn'),
+      exportBtn: document.getElementById('exportBtn'),
+      importInput: document.getElementById('importInput'),
+      progressPct: document.getElementById('progressPct'),
+      progressTrack: document.getElementById('progressTrack'),
+      progressBar: document.getElementById('progressBar'),
+      milestoneLabels: document.getElementById('milestoneLabels'),
+      nextUp: document.getElementById('nextUp'),
+      lastResults: document.getElementById('lastResults'),
+      watching: document.getElementById('watching'),
+      testsGrid: document.getElementById('testsGrid'),
+      addTestBtn: document.getElementById('addTestBtn'),
+      saveBtns: () => document.querySelectorAll('.saveBtn'),
+      testCardTemplate: document.getElementById('testCardTemplate'),
+      chatToggle: document.getElementById('chatToggle'),
+      chatPanel: document.getElementById('chatPanel'),
+      chatClose: document.getElementById('chatClose'),
+      chatLog: document.getElementById('chatLog'),
+      chatInput: document.getElementById('chatInput'),
+      chatSend: document.getElementById('chatSend'),
+    };
+
+    function fmt(d) {
+      if (!d) return '';
+      const date = (d instanceof Date) ? d : new Date(d);
+      return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    }
+
+    function computeProgress(data) {
+      const start = new Date(data.planStart);
+      const end = new Date(start);
+      end.setMonth(end.getMonth() + Number(data.planLengthMonths));
+      const now = new Date();
+      const pct = Math.min(100, Math.max(0, ((now - start) / (end - start)) * 100));
+      return pct;
+    }
+
+    function renderProgress(data) {
+      const pct = computeProgress(data);
+      els.progressBar.style.width = pct + '%';
+      els.progressPct.textContent = Math.round(pct) + '%';
+
+      // Clear old dots/labels
+      els.progressTrack.querySelectorAll('.dot').forEach(n => n.remove());
+      els.milestoneLabels.innerHTML = '';
+
+      // Place milestone dots at equal spacing based on test dates (sorted)
+      const start = new Date(data.planStart);
+      const end = new Date(start); end.setMonth(end.getMonth() + Number(data.planLengthMonths));
+      const total = end - start;
+
+      const testsSorted = [...data.tests].sort((a,b)=> new Date(a.date) - new Date(b.date));
+      testsSorted.forEach((t, idx) => {
+        const td = new Date(t.date);
+        const offset = ((td - start) / total) * 100;
+        const dot = document.createElement('div');
+        dot.className = 'dot';
+        dot.style.left = `${offset}%`;
+        if (t.status === 'Completed') dot.classList.add('completed');
+        else if (td > new Date() && t.status !== 'Completed') dot.classList.add('upcoming');
+        dot.title = `${t.name} • ${fmt(t.date)}`;
+        els.progressTrack.appendChild(dot);
+
+        const lbl = document.createElement('div');
+        lbl.className = 'rounded-xl bg-white border border-gray-100 p-3 text-sm shadow-sm';
+        lbl.innerHTML = `<div class="font-medium">${t.name}</div>
+                         <div class="text-[var(--muted)]">${fmt(t.date)}</div>`;
+        els.milestoneLabels.appendChild(lbl);
+      });
+    }
+
+    function renderOverview(data) {
+      els.nextUp.value = data.nextUp || '';
+      els.lastResults.value = data.lastResults || '';
+      els.watching.value = data.watching || '';
+    }
+
+    async function renderTests(data) {
+      els.testsGrid.innerHTML = '';
+      for (const t of data.tests) {
+        const node = els.testCardTemplate.content.cloneNode(true);
+        node.querySelector('.test-name').textContent = t.name;
+        const status = node.querySelector('.status');
+        status.value = t.status || 'Pending';
+        const date = node.querySelector('.date');
+        date.value = t.date || '';
+        const time = node.querySelector('.time');
+        time.value = t.time || '';
+        const purpose = node.querySelector('.purpose');
+        purpose.value = t.purpose || '';
+        const results = node.querySelector('.results');
+        results.value = t.results || '';
+
+        // Files
+        const fileBtn = node.querySelector('.fileBtn');
+        const fileInput = node.querySelector('.fileInput');
+        const fileList = node.querySelector('.fileList');
+        const clearFilesBtn = node.querySelector('.clearFilesBtn');
+
+        // Load existing files
+        const files = await getFilesByTest(t.id);
+        files.forEach(f => addFileListItem(fileList, f));
+
+        fileBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', async (e) => {
+          const files = Array.from(e.target.files || []);
+          for (const f of files) {
+            const arrayBuf = await f.arrayBuffer();
+            const id = uid('file');
+            await putFile({ id, testId: t.id, name: f.name, type: f.type, size: f.size, data: arrayBuf });
+            addFileListItem(fileList, { id, testId: t.id, name: f.name, type: f.type, size: f.size });
+          }
+          e.target.value = '';
+        });
+
+        clearFilesBtn.addEventListener('click', async () => {
+          await clearFilesByTest(t.id);
+          fileList.innerHTML = '';
+        });
+
+        node.querySelector('.saveTest').addEventListener('click', () => {
+          const d = store.get();
+          const idx = d.tests.findIndex(x => x.id === t.id);
+          if (idx !== -1) {
+            d.tests[idx] = { ...d.tests[idx],
+              status: status.value,
+              date: date.value,
+              time: time.value,
+              purpose: purpose.value,
+              results: results.value,
+            };
+            store.set(d);
+            renderProgress(d);
+            chatSay(`Saved ${t.name}.`);
+          }
+        });
+        node.querySelector('.deleteTest').addEventListener('click', async () => {
+          const d = store.get();
+          d.tests = d.tests.filter(x => x.id !== t.id);
+          store.set(d);
+          await clearFilesByTest(t.id);
+          renderAll();
+          chatSay(`Deleted ${t.name}.`);
+        });
+
+        els.testsGrid.appendChild(node);
+      }
+    }
+
+    function addFileListItem(listEl, f) {
+      const li = document.createElement('li');
+      const readable = `${f.name} (${Math.round((f.size||0)/1024)} KB)`;
+      const openBtn = document.createElement('button');
+      openBtn.className = 'underline';
+      openBtn.textContent = readable;
+      openBtn.addEventListener('click', async () => {
+        // Fetch blob from IDB when opening
+        if (!idb) await openDB();
+        const tx = idb.transaction(FILE_STORE, 'readonly');
+        const storeOS = tx.objectStore(FILE_STORE);
+        const req = storeOS.get(f.id);
+        req.onsuccess = () => {
+          const rec = req.result;
+          if (!rec) return;
+          const blob = new Blob([rec.data], { type: rec.type || 'application/octet-stream' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = rec.name; a.target = '_blank';
+          document.body.appendChild(a); a.click();
+          setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1000);
+        };
+      });
+      li.appendChild(openBtn);
+      listEl.appendChild(li);
+    }
+
+    function renderAll() {
+      const data = store.get();
+      els.planStart.value = data.planStart;
+      els.planLength.value = String(data.planLengthMonths);
+      renderProgress(data);
+      renderOverview(data);
+      renderTests(data);
+    }
+
+    // --- Events ---
+    els.planStart.addEventListener('change', () => {
+      const d = store.get();
+      d.planStart = els.planStart.value;
+      // If using default tests (names Test 1..4), reseed their dates
+      if (d.tests.length === 4 && d.tests.every((t,i)=> t.name === `Test ${i+1}`)) {
+        d.tests = seedDefaultDates(d);
+      }
+      store.set(d); renderAll();
+    });
+
+    els.planLength.addEventListener('change', () => {
+      const d = store.get();
+      d.planLengthMonths = Number(els.planLength.value);
+      store.set(d); renderAll();
+    });
+
+    els.resetBtn.addEventListener('click', () => {
+      const d = store.get();
+      const today = new Date();
+      d.planStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString().slice(0,10);
+      store.set(d); renderAll();
+    });
+
+    els.addTestBtn.addEventListener('click', () => {
+      const d = store.get();
+      d.tests.push({ id: uid('t'), name: `Test ${d.tests.length+1}`, status: 'Pending', date: d.planStart, time: '', purpose: '', results: '' });
+      store.set(d); renderAll();
+    });
+
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.saveBtn');
+      if (!btn) return;
+      const key = btn.dataset.save;
+      const d = store.get();
+      d[key] = document.getElementById(key).value;
+      store.set(d);
+      chatSay(`Saved “${key.replace(/([A-Z])/g,' $1').trim()}”.`);
+    });
+
+    // Export/Import (metadata only; files remain in IndexedDB)
+    els.exportBtn.addEventListener('click', () => {
+      const data = store.get();
+      const blob = new Blob([JSON.stringify(data,null,2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'recurrence_dashboard_export.json';
+      document.body.appendChild(a); a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 800);
+    });
+
+    els.importInput.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const txt = await file.text();
+      try {
+        const data = JSON.parse(txt);
+        if (!data.tests) throw new Error('Invalid file');
+        store.set(data); renderAll(); chatSay('Imported data.');
+      } catch(err) {
+        alert('Import failed: ' + err.message);
+      }
+      e.target.value = '';
+    });
+
+    // --- Lightweight Command Chat ---
+    const chat = { log: [] };
+
+    function chatRender() {
+      els.chatLog.innerHTML = '';
+      chat.log.forEach(m => {
+        const wrap = document.createElement('div');
+        wrap.className = 'text-sm';
+        const bubble = document.createElement('div');
+        bubble.className = 'inline-block px-3 py-2 rounded-2xl ' + (m.role==='user' ? 'bg-white border' : 'bg-[var(--accent)] text-white');
+        bubble.textContent = m.text;
+        wrap.appendChild(bubble);
+        els.chatLog.appendChild(wrap);
+      });
+      els.chatLog.scrollTop = els.chatLog.scrollHeight;
+    }
+
+    function chatSay(text) { chat.log.push({ role:'assistant', text }); chatRender(); }
+    function chatUser(text) { chat.log.push({ role:'user', text }); chatRender(); }
+
+    function parseCommand(cmd) {
+      const d = store.get();
+      let m;
+      // mark test N completed
+      if (m = cmd.match(/^mark\s+test\s+(\d+)\s+(completed|scheduled|upcoming|pending|needs follow-?up)$/i)) {
+        const idx = Number(m[1]) - 1;
+        const status = m[2].replace(/\b\w/g, c=>c.toUpperCase()).replace(/\s+/g,' ');
+        if (d.tests[idx]) { d.tests[idx].status = status; store.set(d); renderAll(); return `Set ${d.tests[idx].name} to ${status}.`; }
+        return 'No such test.';
+      }
+      // set test N date YYYY-MM-DD
+      if (m = cmd.match(/^set\s+test\s+(\d+)\s+date\s+(\d{4}-\d{2}-\d{2})$/i)) {
+        const idx = Number(m[1]) - 1; const date = m[2];
+        if (d.tests[idx]) { d.tests[idx].date = date; store.set(d); renderAll(); return `Updated ${d.tests[idx].name} date to ${fmt(date)}.`; }
+        return 'No such test.';
+      }
+      // set next up: ...
+      if (m = cmd.match(/^set\s+next\s*up\s*:\s*(.+)$/i)) { d.nextUp = m[1]; store.set(d); renderOverview(d); return 'Updated Next Up.'; }
+      // set results from last time: ...
+      if (m = cmd.match(/^set\s*results\s*from\s*last\s*time\s*:\s*(.+)$/i)) { d.lastResults = m[1]; store.set(d); renderOverview(d); return 'Updated Results from Last Time.'; }
+      // add watching: ...
+      if (m = cmd.match(/^add\s*watch(ing)?\s*:\s*(.+)$/i)) { d.watching = (d.watching ? d.watching + "\n" : '') + m[2]; store.set(d); renderOverview(d); return 'Added to Things We\'re Watching.'; }
+      // set purpose for test N: ...
+      if (m = cmd.match(/^set\s*purpose\s*for\s*test\s*(\d+)\s*:\s*(.+)$/i)) {
+        const idx = Number(m[1]) - 1; if (d.tests[idx]) { d.tests[idx].purpose = m[2]; store.set(d); renderAll(); return 'Updated purpose.'; } return 'No such test.';
+      }
+      // set results for test N: ...
+      if (m = cmd.match(/^set\s*results\s*for\s*test\s*(\d+)\s*:\s*(.+)$/i)) {
+        const idx = Number(m[1]) - 1; if (d.tests[idx]) { d.tests[idx].results = m[2]; store.set(d); renderAll(); return 'Updated results.'; } return 'No such test.';
+      }
+      // help
+      if (/^help$/i.test(cmd)) {
+        return 'Commands: "mark test 1 completed", "set test 2 date 2025-02-01", "set next up: ...", "set results from last time: ...", "add watching: ...", "set purpose for test 1: ...", "set results for test 3: ..."';
+      }
+      return 'Sorry, I didn\'t catch that. Type "help" for examples.';
+    }
+
+    els.chatToggle.addEventListener('click', () => { els.chatPanel.classList.toggle('hidden'); });
+    els.chatClose.addEventListener('click', () => { els.chatPanel.classList.add('hidden'); });
+    els.chatSend.addEventListener('click', () => {
+      const text = els.chatInput.value.trim(); if (!text) return;
+      chatUser(text);
+      const resp = parseCommand(text);
+      chatSay(resp);
+      els.chatInput.value='';
+    });
+    els.chatInput.addEventListener('keydown', (e) => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); els.chatSend.click(); } });
+
+    // Init
+    (async function(){ await openDB(); renderAll(); chatSay('Hi! Try commands like: "mark test 1 completed" or "set test 2 date 2026-03-01".'); })();
+  // === Appended: OpenAI integration & Settings wiring ===
+    (function(){
+      const aiStore = {
+        get(){ try { return JSON.parse(localStorage.getItem('recurrence_ai')) || { enabled:false, model:'gpt-4o-mini' }; } catch { return { enabled:false, model:'gpt-4o-mini' }; } },
+        set(v){ localStorage.setItem('recurrence_ai', JSON.stringify(v)); }
+      };
+      function $(id){ return document.getElementById(id); }
+      function refreshAIStatus(){ const ai = aiStore.get(); const el = $('aiStatusInner'); if (el) el.textContent = ai.enabled ? `Enabled (${ai.model})` : 'Disabled'; }
+      refreshAIStatus();
+
+      // Settings modal
+      const settingsBtn=$('settingsBtn'), settingsModal=$('settingsModal'), settingsClose=$('settingsClose');
+      const openaiKey=$('openaiKey'), openaiModel=$('openaiModel'), aiEnabledSel=$('aiEnabled'), saveSettings=$('saveSettings');
+      function openSettings(){ if (!settingsModal) return; const ai = aiStore.get(); if (openaiKey) openaiKey.value = localStorage.getItem('recurrence_openai_key') || ''; if (openaiModel) openaiModel.value = ai.model || 'gpt-4o-mini'; if (aiEnabledSel) aiEnabledSel.value = ai.enabled ? 'true' : 'false'; settingsModal.classList.remove('hidden'); settingsModal.classList.add('flex'); }
+      function closeSettings(){ if (!settingsModal) return; settingsModal.classList.add('hidden'); settingsModal.classList.remove('flex'); }
+      if (settingsBtn) settingsBtn.addEventListener('click', openSettings);
+      if (settingsClose) settingsClose.addEventListener('click', closeSettings);
+      if (saveSettings) saveSettings.addEventListener('click', ()=>{
+        const key = (openaiKey?.value || '').trim(); if (key) localStorage.setItem('recurrence_openai_key', key);
+        const enabled = (aiEnabledSel?.value || 'false') === 'true';
+        const model = (openaiModel?.value || 'gpt-4o-mini');
+        aiStore.set({ enabled, model }); refreshAIStatus(); closeSettings();
+        const log = $('chatLog'); if (log){ const div=document.createElement('div'); div.className='text-sm'; const b=document.createElement('div'); b.className='inline-block px-3 py-2 rounded-2xl bg-[var(--accent)] text-white'; b.textContent=`Settings saved. AI ${enabled ? 'enabled' : 'disabled'} (${model}).`; div.appendChild(b); log.appendChild(div); log.scrollTop=log.scrollHeight; }
+      });
+
+      // AI call helper
+      async function aiInterpretAndExecute(userText){
+        const ai = aiStore.get(); if (!ai.enabled) return 'AI assistant is disabled.';
+        const key = localStorage.getItem('recurrence_openai_key'); if (!key) return 'No OpenAI key set. Open Settings to add one.';
+        const sys = `You are an assistant controlling a local dashboard for cancer-monitoring milestones. Convert the user's natural-language request into a single command in this grammar if possible, otherwise provide a short answer. Grammar examples:
+- mark test N completed|scheduled|upcoming|pending|needs follow-up
+- set test N date YYYY-MM-DD
+- set next up: TEXT
+- set results from last time: TEXT
+- add watching: TEXT
+- set purpose for test N: TEXT
+- set results for test N: TEXT
+Return a compact JSON object. If an action is possible, return {"command":"..."}. If only an answer, return {"answer":"..."}. Do not include explanations.`;
+        function currentDataSummary(){ try{ const d = JSON.parse(localStorage.getItem('recurrence_dashboard')); const tests=(d?.tests||[]).map((t,i)=>({index:i+1,name:t.name,status:t.status,date:t.date,purpose:t.purpose,results:t.results})); return {planStart:d?.planStart,planLengthMonths:d?.planLengthMonths,nextUp:d?.nextUp,lastResults:d?.lastResults,watching:d?.watching,tests}; } catch { return {}; } }
+        const payload = { model: ai.model || 'gpt-4o-mini', messages: [ {role:'system', content: sys}, {role:'user', content:`Dashboard state (JSON): ${JSON.stringify(currentDataSummary())}`}, {role:'user', content:userText} ] };
+        try{
+          const resp = await fetch('https://api.openai.com/v1/chat/completions', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${key}` }, body: JSON.stringify(payload) });
+          if (!resp.ok){ const text=await resp.text(); return `OpenAI error: ${resp.status} ${text}`; }
+          const data = await resp.json(); const text = data.choices?.[0]?.message?.content?.trim() || '';
+          let parsed; try{ parsed = JSON.parse(text);}catch{}
+          if (parsed?.command) { const outcome = window.parseCommand ? window.parseCommand(parsed.command) : null; return `AI → ${parsed.command}
+${outcome || 'Command not recognized.'}`; }
+          if (parsed?.answer) return parsed.answer;
+          const fallback = window.parseCommand ? window.parseCommand(text) : null; return fallback || text || 'No response.';
+        } catch(e){ return 'Failed to contact OpenAI: ' + e.message; }
+      }
+
+      // Replace chat listeners to enable AI fallback
+      function wireChat(){
+        const chatSend = $('chatSend'); const chatInput = $('chatInput'); const chatLog = $('chatLog');
+        if (!chatSend || !chatInput || !chatLog) return;
+        const newBtn = chatSend.cloneNode(true); chatSend.parentNode.replaceChild(newBtn, chatSend); const newInput = chatInput.cloneNode(true); chatInput.parentNode.replaceChild(newInput, chatInput);
+        newBtn.addEventListener('click', async ()=>{
+          const text = newInput.value.trim(); if (!text) return;
+          // render user bubble
+          const wrap=document.createElement('div'); wrap.className='text-sm'; const bub=document.createElement('div'); bub.className='inline-block px-3 py-2 rounded-2xl bg-white border'; bub.textContent=text; wrap.appendChild(bub); chatLog.appendChild(wrap); chatLog.scrollTop=chatLog.scrollHeight;
+          // try local parser first
+          let resp = window.parseCommand ? window.parseCommand(text) : null;
+          if (!resp || /^Sorry, I didn/.test(resp)) { resp = await aiInterpretAndExecute(text); }
+          const wrap2=document.createElement('div'); wrap2.className='text-sm'; const bub2=document.createElement('div'); bub2.className='inline-block px-3 py-2 rounded-2xl bg-[var(--accent)] text-white'; bub2.textContent=resp; wrap2.appendChild(bub2); chatLog.appendChild(wrap2); chatLog.scrollTop=chatLog.scrollHeight; newInput.value='';
+        });
+        newInput.addEventListener('keydown', (e)=>{ if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); newBtn.click(); } });
+      }
+      wireChat();
+    })();
+  </script>
+</body>
+</html>
